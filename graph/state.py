@@ -35,3 +35,7 @@ class WorkflowState(BaseModel):
 
     # Publishing result
     publish_result: Optional[str] = None       # e.g., LinkedIn URL / ID / mock path
+
+    review_decision: Optional[str] = None  # "approve" | "revise" | None
+    review_comment: Optional[str] = None   # your feedback or edits
+    final_post: Optional[str] = None       # final approved text
