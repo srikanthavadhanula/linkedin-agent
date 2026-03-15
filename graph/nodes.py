@@ -6,6 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 from config.settings import DEFAULT_AUDIENCE,DEFAULT_POST_GOAL,DEFAULT_TONE
 from llm.provider import get_llm
 from graph.state import WorkflowState
+from tools.web_research import run_web_search
 
 
 def ingest_input(state: WorkflowState) -> WorkflowState:
@@ -56,48 +57,86 @@ def analyze_content(state: WorkflowState) -> WorkflowState:
 
 def research_online(state: WorkflowState) -> WorkflowState:
     """
-    Simulated research / enrichment node.
-
-    It does NOT call the real web. Instead, it:
-      - looks at the structured analysis
-      - suggests what should be fact-checked
-      - suggests what external data/examples would strengthen the post
-    and stores that as a readable 'research_notes' string on the state.
+    Real research node:
+      1) Ask LLM to propose 2-3 concrete web search queries.
+      2) Call Tavily with those queries.
+      3) Summarize findings into research_notes and keep raw results.
     """
-    # If we don't have analysis yet, there is nothing to base research on.
     if not state.analysis:
         return state
 
     llm = get_llm()
 
-    prompt = ChatPromptTemplate.from_messages([
+    # Step 1: generate search queries from analysis
+    query_prompt = ChatPromptTemplate.from_messages([
         (
             "system",
-            "You are an assistant helping to plan fact-checking and enrichment "
-            "for a LinkedIn post. You DO NOT have direct web access in this node. "
-            "You only suggest what to research and what data would be useful.",
+            "You suggest focused web search queries for fact-checking and enrichment "
+            "of a LinkedIn post idea.",
         ),
         (
             "human",
-            "Here is the structured analysis for a LinkedIn post:\n\n"
+            "Here is the structured analysis of a LinkedIn post:\n\n"
             "{analysis}\n\n"
-            "Based on this analysis, please provide 'Research Notes' with the "
-            "following sections:\n"
-            "1) Facts or claims that should be verified online (bullet list).\n"
-            "2) Useful external sources to look for (e.g., kinds of reports, "
-            "docs, blog posts), without inventing specific URLs.\n"
-            "3) Concrete data points, examples, or case studies that would make "
-            "the post more compelling.\n\n"
-            "Do NOT fabricate URLs. Write the notes in a way that a human could "
-            "follow as a mini research checklist.",
+            "Based on this, propose 2-4 concise web search queries that would help "
+            "find:\n"
+            "- statistics or data points\n"
+            "- concrete examples or case studies\n"
+            "- definitions or explanations of key concepts\n\n"
+            "Return them as a bullet list, one query per line.",
         ),
     ])
 
-    chain = prompt | llm | StrOutputParser()
+    query_chain = query_prompt | llm | StrOutputParser()
+    queries_text = query_chain.invoke({"analysis": state.analysis})
 
-    notes = chain.invoke({"analysis": state.analysis})
+    # Extract lines starting with '-' or '*'
+    raw_lines = [line.strip("-• ").strip() for line in queries_text.splitlines() if line.strip()]
+    search_queries = [q for q in raw_lines if q]
 
-    state.research_notes = notes
+    if not search_queries:
+        state.research_notes = "No specific web research queries generated."
+        return state
+
+    # Step 2: call Tavily
+    search_results = run_web_search(search_queries)
+
+    # Step 3: summarize findings back into research_notes
+    summary_prompt = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            "You summarize web research into concise notes for a LinkedIn post. "
+            "Focus on: key facts, useful examples, and how they support the main idea.",
+        ),
+        (
+            "human",
+            "Original analysis:\n\n{analysis}\n\n"
+            "Search queries used:\n{queries}\n\n"
+            "Raw search results (title, url, content):\n{results}\n\n"
+            "Produce 'Research Notes' with:\n"
+            "1) Key facts and data points (bullet list, mention source name).\n"
+            "2) Examples or case studies worth referencing.\n"
+            "3) Any cautions or uncertainties in the data.\n",
+        ),
+    ])
+
+    summary_chain = summary_prompt | llm | StrOutputParser()
+    results_str = "\n\n".join(
+        f"- [{r['query']}] {r['title']} ({r['url']})\n{r['content']}"
+        for r in search_results
+    )
+
+    research_notes = summary_chain.invoke(
+        {
+            "analysis": state.analysis,
+            "queries": "\n".join(f"- {q}" for q in search_queries),
+            "results": results_str[:8000],  # safety: truncate long content
+        }
+    )
+
+    state.research_notes = research_notes
+    # Optional: keep raw results on state if you add a field for it
+    # state.research_results = search_results
     return state
 
 

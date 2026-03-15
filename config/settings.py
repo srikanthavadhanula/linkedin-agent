@@ -6,6 +6,7 @@ load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+TAVIAL_API_KEY = os.getenv("TAVILY_API_KEY")
 
 
 # ─────────────────────────────────────────

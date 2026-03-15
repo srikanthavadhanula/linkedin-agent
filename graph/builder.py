@@ -29,7 +29,7 @@ def build_hitl_graph():
 
     graph.add_node("analyze_content", analyze_content)
     graph.add_node("generate_draft", generate_draft)
-    graph.add_node("research_online", research_online)
+    # graph.add_node("research_online", research_online)
     
     graph.add_node("review_draft", review_draft)
     graph.add_node("decide_next_step", decide_next_step)
@@ -37,8 +37,9 @@ def build_hitl_graph():
     graph.add_node("finalize_post", finalize_post)
 
     graph.add_edge(START, "analyze_content")
-    graph.add_edge("analyze_content", "research_online")
-    graph.add_edge("research_online", "generate_draft")
+    graph.add_edge("analyze_content", "generate_draft")
+    # graph.add_edge("analyze_content", "research_online")
+    # graph.add_edge("research_online", "generate_draft")
     graph.add_edge("generate_draft", "review_draft")
 
     graph.add_edge("decide_next_step", "revise_draft")
